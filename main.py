@@ -1,57 +1,80 @@
-import requests
-import json 
 import argparse
 import datetime
-import matplotlib.pyplot as plt
 import pandas as pd
+from src.util.req import request_get
+from src.util.dfops import df_to_html
+from src.util.mail import send_mail
+from dotenv import load_dotenv
+import logging
+import os
+load_dotenv()
 
-
-def request_get(url: str):
-    url_result = requests.get(url)
-    rec_data = json.loads(url_result.text)
-    return rec_data
-
-def df_to_table_png(df: pd.DataFrame,name: str):
-    # plt.rcParams["figure.figsize"] = [10, 10]
-    plt.rcParams["figure.autolayout"] = True
-    fig, ax = plt.subplots(1, 1)
-    data = df.values
-    columns = df.columns
-    ax.axis('tight')
-    ax.axis('off')
-    the_table = ax.table(cellText=data, colLabels=columns, loc='center')
-    # the_table.auto_set_font_size(False)
-    the_table.set_fontsize(20)
-    # the_table.scale(2, 2)
-    plt.savefig(name)
-
-CITY_CODE = "311001"
-MIN_AGE = 45
-DATE = datetime.datetime.strftime(datetime.datetime.today(),"%d-%m-%Y")
-COLUMNS = ['name', 'address', 'state_name', 'district_name',
-       'block_name', 'from', 'to','date', 'available_capacity', 'fee', 'min_age_limit',
-       'vaccine', 'slots']
-api_url = (
-    "https://cdn-api.co-vin.in/api/v2/appointment/sessions/public/findByPin?pincode="
-    + CITY_CODE
-    + "&date="
-    + DATE
+logging.basicConfig(
+    filename=os.path.join(os.getcwd(),"service.log"),
+    filemode="a",
+    level=logging.DEBUG,
+    format='%(asctime)s [%(levelname)s]:%(message)s'
 )
+logger = logging.getLogger(__name__)
 
-data = request_get(api_url)
-list_of_avail_centers = data["sessions"]
 
-if len(list_of_avail_centers) == 0:
-    print("No Centers available today. SAD")
-else:
-    filtered = []
-    for center_info in list_of_avail_centers:
-        if center_info["min_age_limit"] <= MIN_AGE and center_info["available_capacity"] > 0:
-            filtered.append(center_info)
-    if len(filtered) == 0:
-        print("No results for minimum age :",MIN_AGE)
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='command line arguments')
+
+    parser.add_argument(
+        "--pin-code",
+        type=int,
+        default=311001
+    )
+    parser.add_argument(
+        "--min-age",
+        type=int
+    )
+    parser.add_argument(
+        "--rec-email",
+        type=str
+    )
+
+    args = parser.parse_args()
+
+    CITY_CODE = args.pin_code
+    MIN_AGE = args.min_age
+    REC_EMAIL = args.rec_email
+
+    DATE = datetime.datetime.strftime(datetime.datetime.today(), "%d-%m-%Y")
+    API_URL = "https://cdn-api.co-vin.in/api/v2/appointment/sessions/public/findByPin?pincode=" + \
+        str(CITY_CODE)+"&date="+DATE
+
+    REC_LIST = [i.strip() for i in REC_EMAIL.split(",")]
+
+    data = request_get(API_URL)
+    if data is not None and "error" not in data:
+        list_of_avail_centers = data["sessions"]
+
+        if len(list_of_avail_centers) == 0:
+            logger.debug("No Centers available today. SAD")
+        else:
+            filtered = []
+            for center_info in list_of_avail_centers:
+                if center_info["min_age_limit"] <= MIN_AGE and center_info["available_capacity"] > 0:
+                    filtered.append(center_info)
+            if len(filtered) == 0:
+                logger.debug("No results for minimum age :"+ str(MIN_AGE) +" SAD")
+            else:
+                logger.debug(str(len(filtered)) + "Results found")
+                try:
+                    df = pd.DataFrame(filtered)
+                    html_str = df_to_html(df)
+                    subject = "ALERT FOR VACCINATION DETAIL :" + DATE
+
+                    for rec in REC_LIST:
+                        try:
+                            send_mail(subject=subject, body=html_str,
+                                body_type="html", to_user=rec)
+                            logger.info("MAIL SENT SUCCESSFULLY TO "+ str(rec))
+                        except Exception as e:
+                            logger.error(str(e))
+                except Exception as e:
+                    logger.error(str(e))
     else:
-        
-        df = pd.DataFrame(filtered)
-        df = df[COLUMNS]
-        df_to_table_png(df,'mytable.png')
+        logger.debug("None received from URL.")
