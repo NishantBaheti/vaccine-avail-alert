@@ -2,8 +2,8 @@
 
 - create a .env file with two things 
     
-    SENDER_EMAIL=<your_email>
-    SENDER_PASSWD=<password>
+        SENDER_EMAIL=<your_email>
+        SENDER_PASSWD=<password>
 
 - run it as a cron job or a triggered service in you system 
 - params are 
